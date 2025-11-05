@@ -51,6 +51,47 @@ def createPoseGraph(vertexes, edges):
 
     return graph, initial_estimate
 
+
+def optimizePoseGraph(graph, initial_estimate):
+    parameters = gtsam.GaussNewtonParams()
+    # Set optimization parameters
+    parameters.setRelativeErrorTol(1e-5) # Stop when change in error is small
+    parameters.setMaxIterations(100)     # Limit iterations
+    optimizer = gtsam.GaussNewtonOptimizer(graph, initial_estimate, parameters)
+
+    # Optimize!
+    result = optimizer.optimize()
+    marginals = gtsam.Marginals(graph, result)
+    covariances = [marginals.marginalCovariance(i) for i in range(result.size())]
+    return result, covariances
+
+def incremental_solution_2d(poses, edges):
+    isam = gtsam.ISAM2()
+    result = None
+    for pose in poses:
+        graph = gtsam.NonlinearFactorGraph()
+        initial_estimate = gtsam.Values()
+        _, i, x, y, theta = pose
+        if i == 0:
+            graph.add(gtsam.PriorFactorPose2(i, Pose2(x, y, theta), gtsam.noiseModel.Diagonal.Variances(np.array([1e-6, 1e-6, 1e-8]))))
+            initial_estimate.insert(i, Pose2(x, y, theta))
+        else:
+            prev_pose = poses[i-1]
+            initial_estimate.insert(i, Pose2(prev_pose[2], prev_pose[3], prev_pose[4]))
+        
+        for edge in edges:
+            _, ii, jj, dx, dy, dtheta, q = edge
+            if  jj == i:
+
+                pose_ = Pose2(dx, dy, dtheta)
+                information_matrix = gtsam.noiseModel.Gaussian.Information(np.array([[q[0], q[1], q[2]],
+                                                                                    [q[1], q[3], q[4]],
+                                                                                    [q[2], q[4], q[5]]]))
+                graph.add(gtsam.BetweenFactorPose2(ii, jj, pose_, information_matrix))
+        isam.update(graph, initial_estimate)
+        result = isam.calculateEstimate()
+    return result
+
 def showGraph(poses, cov=None, title="Initial Trajectory", output_path=None):    
     fig = plt.figure(0)
     axes = fig.gca()
@@ -66,30 +107,21 @@ def showGraph(poses, cov=None, title="Initial Trajectory", output_path=None):
     plt.xlabel("X-coordinate")
     plt.ylabel("Y-coordinate")
     plt.grid(True)
-    plt.savefig(f"{output_path}.png")
+    plt.savefig(f"pose2dImages/{output_path}.png")
     plt.close()
-
-def optimizePoseGraph(graph, initial_estimate):
-    parameters = gtsam.GaussNewtonParams()
-    # Set optimization parameters
-    parameters.setRelativeErrorTol(1e-5) # Stop when change in error is small
-    parameters.setMaxIterations(100)     # Limit iterations
-    optimizer = gtsam.GaussNewtonOptimizer(graph, initial_estimate, parameters)
-
-    # Optimize!
-    result = optimizer.optimize()
-    marginals = gtsam.Marginals(graph, result)
-    covariances = [marginals.marginalCovariance(i) for i in range(result.size())]
-    return result, covariances
 
 def main():
     vertexes, edges = readData('input_INTEL_g2o.g2o')
     graph, initial_estimate = createPoseGraph(vertexes, edges)
-    showGraph(initial_estimate, output_path='pose_graph_initial')
+    # showGraph(initial_estimate, output_path='pose_graph_initial')
     marginals = gtsam.Marginals(graph, initial_estimate)
-    showGraph(initial_estimate, cov=[marginals.marginalCovariance(i) for i in range(initial_estimate.size())],  output_path='pose_graph_initial2')
-    result, covariances = optimizePoseGraph(graph, initial_estimate)
-    showGraph(result, cov=covariances, title="Optimized Trajectory", output_path='pose_graph_optimized')
+    # showGraph(initial_estimate, cov=[marginals.marginalCovariance(i) for i in range(initial_estimate.size())],  output_path='pose_graph_initial2')
+    optimizedGN, covariances = optimizePoseGraph(graph, initial_estimate)
+    # showGraph(result, cov=covariances, title="Optimized Trajectory", output_path='pose_graph_optimized')
+    incremental_result = incremental_solution_2d(vertexes, edges)
+    showGraph(incremental_result, title="Incremental Optimized Trajectory", output_path='pose_graph_incremental_optimized')
+    # print("Incremental Result:", format(incremental_result))
+
     
 if __name__ == "__main__":
     main()
