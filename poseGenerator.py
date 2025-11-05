@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 def readData(file = 'input_INTEL_g2o.g2o'):
     vertexes = []
     edges = []
-    with open(file, 'r') as f:
+    with open(f"data/{file}", 'r') as f:
         lines = f.readlines()
         for line in lines:
             line = line.strip().split()
@@ -35,9 +35,10 @@ def readData(file = 'input_INTEL_g2o.g2o'):
 def createPoseGraph(vertexes, edges):
     graph = gtsam.NonlinearFactorGraph()
     initial_estimate = gtsam.Values()    
-    graph.add(gtsam.PriorFactorPose2(0, Pose2(0, 0, 0), gtsam.noiseModel.Diagonal.Variances(np.array([1e-6, 1e-6, 1e-8]))))
     for vertex in vertexes:
         _, idx, x, y, theta = vertex
+        if idx == 0:
+            graph.add(gtsam.PriorFactorPose3(idx, Pose2(x, y, theta), gtsam.noiseModel.Diagonal.Variances(np.array([1e-6, 1e-6, 1e-8]))))
         pose = Pose2(x, y, theta)
         initial_estimate.insert(idx, pose)   
 
@@ -107,20 +108,27 @@ def showGraph(poses, cov=None, title="Initial Trajectory", output_path=None):
     plt.xlabel("X-coordinate")
     plt.ylabel("Y-coordinate")
     plt.grid(True)
-    plt.savefig(f"pose2dImages/{output_path}.png")
+    plt.savefig(f"pose2dImages/{output_path}.svg")
     plt.close()
 
 def main():
+    
+    print("Leyendo datos...\n")
     vertexes, edges = readData('input_INTEL_g2o.g2o')
+
+    print("Generando la estimacion inicial...\n")
     graph, initial_estimate = createPoseGraph(vertexes, edges)
-    # showGraph(initial_estimate, output_path='pose_graph_initial')
+    showGraph(initial_estimate, output_path='pose_graph_initial')
     marginals = gtsam.Marginals(graph, initial_estimate)
-    # showGraph(initial_estimate, cov=[marginals.marginalCovariance(i) for i in range(initial_estimate.size())],  output_path='pose_graph_initial2')
+    showGraph(initial_estimate, cov=[marginals.marginalCovariance(i) for i in range(initial_estimate.size())],  output_path='pose_graph_initial_withCov')
+    
+    print("Optimizando el grafo de poses con Gauss Newton...\n")
     optimizedGN, covariances = optimizePoseGraph(graph, initial_estimate)
-    # showGraph(result, cov=covariances, title="Optimized Trajectory", output_path='pose_graph_optimized')
+    showGraph(optimizedGN, cov=covariances, title="Optimized Trajectory", output_path='pose_graph_optimized')
+
+    print("Generando el grafo de poses de forma incremental...\n")
     incremental_result = incremental_solution_2d(vertexes, edges)
     showGraph(incremental_result, title="Incremental Optimized Trajectory", output_path='pose_graph_incremental_optimized')
-    # print("Incremental Result:", format(incremental_result))
 
     
 if __name__ == "__main__":
