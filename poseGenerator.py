@@ -6,9 +6,10 @@ import gtsam
 from gtsam import Pose2
 from gtsam.utils import plot
 import matplotlib.pyplot as plt
+
+
 # [VERTEX_SE2 i x y theta] 
 # [EDGE_SE2 i j dx dy dtheta q11 q12 q13 q22 q23 q33]
-
 def readData(file = 'input_INTEL_g2o.g2o'):
     vertexes = []
     edges = []
@@ -31,6 +32,7 @@ def readData(file = 'input_INTEL_g2o.g2o'):
                 q = list(map(float, line[6:12]))
                 edges.append(('EDGE_SE2', i, j, dx, dy, dtheta, q))
     return vertexes, edges
+
 
 def createPoseGraph(vertexes, edges):
     graph = gtsam.NonlinearFactorGraph()
@@ -66,6 +68,7 @@ def optimizePoseGraph(graph, initial_estimate):
     covariances = [marginals.marginalCovariance(i) for i in range(result.size())]
     return result, covariances
 
+
 def incremental_solution_2d(poses, edges):
     isam = gtsam.ISAM2()
     result = None
@@ -93,7 +96,8 @@ def incremental_solution_2d(poses, edges):
         result = isam.calculateEstimate()
     return result
 
-def showComparisonGraphs(poses1, poses2, title1="Initial Trajectory", title2="Optimized Trajectory", output_path=None):
+
+def showComparisonGraphs(poses1, poses2, title1="Initial Trajectory Estimate", title2="Optimized Trajectory Estimate", output_path=None):
     fig = plt.figure(0)
     ax = fig.add_subplot(111)
     plt.cla()
@@ -138,6 +142,7 @@ def showGraph(poses, cov=None, title="Initial Trajectory", output_path=None):
     plt.savefig(f"pose2dImages/{output_path}.svg")
     plt.close()
 
+
 def main():
     
     print("Leyendo datos...\n")
@@ -151,13 +156,13 @@ def main():
     
     print("Optimizando el grafo de poses con Gauss Newton...\n")
     optimizedGN, covariances = optimizePoseGraph(graph, initial_estimate)
-    showGraph(optimizedGN, cov=covariances, title="Optimized Trajectory", output_path='pose_graph_optimized')
+    showGraph(optimizedGN, title="Optimized Trajectory", output_path='pose_graph_optimized')
     showComparisonGraphs(initial_estimate, optimizedGN, output_path='comparison_initial_gn')
 
     print("Generando el grafo de poses de forma incremental...\n")
     incremental_result = incremental_solution_2d(vertexes, edges)
     showGraph(incremental_result, title="Incremental Optimized Trajectory", output_path='pose_graph_incremental_optimized')
-    showComparisonGraphs(initial_estimate, incremental_result, output_path='comparison_initial_incremental')
+    showComparisonGraphs(initial_estimate, incremental_result, title1="Initial Trajectory Estimate",title2="Incremental Trajectory Estimate", output_path='comparison_initial_incremental')
 
     
 if __name__ == "__main__":
