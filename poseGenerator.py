@@ -6,6 +6,7 @@ import gtsam
 from gtsam import Pose2
 from gtsam.utils import plot
 import matplotlib.pyplot as plt
+import argparse
 
 
 # [VERTEX_SE2 i x y theta] 
@@ -13,24 +14,28 @@ import matplotlib.pyplot as plt
 def readData(file = 'input_INTEL_g2o.g2o'):
     vertexes = []
     edges = []
-    with open(f"data/{file}", 'r') as f:
-        lines = f.readlines()
-        for line in lines:
-            line = line.strip().split()
-            if line[0] == 'VERTEX_SE2':
-                idx = int(line[1])
-                x = float(line[2])
-                y = float(line[3])
-                theta = float(line[4])
-                vertexes.append(('VERTEX_SE2', idx, x, y, theta))
-            elif line[0] == 'EDGE_SE2':
-                i = int(line[1])
-                j = int(line[2])
-                dx = float(line[3])
-                dy = float(line[4])
-                dtheta = float(line[5])
-                q = list(map(float, line[6:12]))
-                edges.append(('EDGE_SE2', i, j, dx, dy, dtheta, q))
+    try:
+        with open(f"data/{file}", 'r') as f:
+            lines = f.readlines()
+            for line in lines:
+                line = line.strip().split()
+                if line[0] == 'VERTEX_SE2':
+                    idx = int(line[1])
+                    x = float(line[2])
+                    y = float(line[3])
+                    theta = float(line[4])
+                    vertexes.append(('VERTEX_SE2', idx, x, y, theta))
+                elif line[0] == 'EDGE_SE2':
+                    i = int(line[1])
+                    j = int(line[2])
+                    dx = float(line[3])
+                    dy = float(line[4])
+                    dtheta = float(line[5])
+                    q = list(map(float, line[6:12]))
+                    edges.append(('EDGE_SE2', i, j, dx, dy, dtheta, q))
+    except FileNotFoundError:
+        print(f"Error: El archivo {file} no se encontró en el directorio 'data/'.")
+        
     return vertexes, edges
 
 
@@ -143,10 +148,13 @@ def showGraph(poses, cov=None, title="Initial Trajectory", output_path=None):
     plt.close()
 
 
-def main():
+def main(dataset='input_INTEL_g2o.g2o'):
     
     print("Leyendo datos...\n")
-    vertexes, edges = readData('input_INTEL_g2o.g2o')
+    vertexes, edges = readData(file=dataset)
+    if not vertexes or not edges:
+        print("No se pudieron leer los datos correctamente.")
+        return
 
     print("Generando la estimacion inicial...\n")
     graph, initial_estimate = createPoseGraph(vertexes, edges)
@@ -166,4 +174,7 @@ def main():
 
     
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Procesamiento de datos de un dataset G20 2d")    
+    parser.add_argument("--dataset", default="input_INTEL_g2o.g2o", help="Dataset g2o 2d a procesar")
+    args = parser.parse_args()
+    main(dataset=args.dataset)

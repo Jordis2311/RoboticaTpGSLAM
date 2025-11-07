@@ -6,31 +6,34 @@ import gtsam
 from gtsam import Pose3
 from gtsam.utils import plot
 import matplotlib.pyplot as plt
-
+import argparse
 
 def readData(file = 'parking-garage.g2o'):
     vertexes = []
     edges = []
-    with open(f"data/{file}", 'r') as f:
-        lines = f.readlines()
-        for line in lines:
-            line = line.strip().split()
-            if line[0] == 'VERTEX_SE3:QUAT':
-                idx = int(line[1])
-                x = float(line[2])
-                y = float(line[3])
-                z = float(line[4])
-                quaternion = list(map(float, line[5:9]))
-                vertexes.append((idx, x, y, z, quaternion))
-            elif line[0] == 'EDGE_SE3:QUAT':
-                i = int(line[1])
-                j = int(line[2])
-                dx = float(line[3])
-                dy = float(line[4])
-                dz = float(line[5])
-                quaternion = list(map(float, line[6:10]))
-                information_values = list(map(float, line[10:]))
-                edges.append((i, j, dx, dy, dz, quaternion, information_values))
+    try:        
+        with open(f"data/{file}", 'r') as f:
+            lines = f.readlines()
+            for line in lines:
+                line = line.strip().split()
+                if line[0] == 'VERTEX_SE3:QUAT':
+                    idx = int(line[1])
+                    x = float(line[2])
+                    y = float(line[3])
+                    z = float(line[4])
+                    quaternion = list(map(float, line[5:9]))
+                    vertexes.append((idx, x, y, z, quaternion))
+                elif line[0] == 'EDGE_SE3:QUAT':
+                    i = int(line[1])
+                    j = int(line[2])
+                    dx = float(line[3])
+                    dy = float(line[4])
+                    dz = float(line[5])
+                    quaternion = list(map(float, line[6:10]))
+                    information_values = list(map(float, line[10:]))
+                    edges.append((i, j, dx, dy, dz, quaternion, information_values))
+    except FileNotFoundError:
+        print(f"Error: El archivo {file} no se encontró en el directorio 'data/'.")
     return vertexes, edges
 
 
@@ -207,10 +210,14 @@ def showGraph3D(poses, cov=None, title="Initial Trajectory", output_path=None):
     plt.close() 
 
 
-def main():
+def main(dataset='parking-garage.g2o'):
     
     print("Leyendo datos...\n")
-    vertexes, edges = readData('parking-garage.g2o')
+    vertexes, edges = readData(dataset)
+
+    if not vertexes or not edges:
+        print("No se pudieron leer los datos correctamente.")
+        return
     
     print("Generando la estimacion inicial...\n")
     graph, initial_estimate = createPoseGraph3D(vertexes, edges)    
@@ -230,4 +237,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()  
+    parser = argparse.ArgumentParser(description="Procesamiento de datos de un dataset G20 3d")
+    parser.add_argument("--dataset", default='parking-garage.g2o', help="Dataset g2o 3d a procesar")
+    args = parser.parse_args()
+    main(dataset=args.dataset)  
