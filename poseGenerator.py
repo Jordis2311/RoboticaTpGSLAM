@@ -11,6 +11,7 @@ import argparse
 
 # [VERTEX_SE2 i x y theta] 
 # [EDGE_SE2 i j dx dy dtheta q11 q12 q13 q22 q23 q33]
+# Lee los datos del archivo g2o caso base lee input_INTEL_g2o.g2o
 def readData(file = 'input_INTEL_g2o.g2o'):
     vertexes = []
     edges = []
@@ -38,7 +39,7 @@ def readData(file = 'input_INTEL_g2o.g2o'):
         
     return vertexes, edges
 
-
+# Estimacion inicial del grafo de poses
 def createPoseGraph(vertexes, edges):
     graph = gtsam.NonlinearFactorGraph()
     initial_estimate = gtsam.Values()    
@@ -59,6 +60,7 @@ def createPoseGraph(vertexes, edges):
 
     return graph, initial_estimate
 
+# Perturba las estimaciones iniciales de las poses
 def pertubateEstimations(poses, sigma, seed):
 
     new_poses = gtsam.Values()
@@ -79,7 +81,7 @@ def pertubateEstimations(poses, sigma, seed):
 
     return new_poses
 
-
+# Optimiza el grafo de poses usando Gauss-Newton
 def optimizePoseGraph(graph, initial_estimate):
     parameters = gtsam.GaussNewtonParams()    
     parameters.setVerbosity("Termination")
@@ -91,7 +93,7 @@ def optimizePoseGraph(graph, initial_estimate):
     covariances = [marginals.marginalCovariance(i) for i in range(result.size())]
     return result, covariances
 
-
+# Solucion incremental del grafo de poses
 def incremental_solution_2d(poses, edges):
     isam = gtsam.ISAM2()
     result = None
@@ -104,8 +106,8 @@ def incremental_solution_2d(poses, edges):
             graph.add(gtsam.PriorFactorPose2(i, pose2, gtsam.noiseModel.Diagonal.Sigmas(np.array([1e-6, 1e-6, 1e-8]))))
             initial_estimate.insert(i, pose2)
         else:
-            _, _, x_, y_, theta_ = poses[i-1]
-            initial_estimate.insert(i, Pose2(x_, y_, theta_))
+            prevPose = result.atPose2(i - 1)
+            initial_estimate.insert(i, prevPose)
         
         for edge in edges:
             _, ii, jj, dx, dy, dtheta, q = edge
@@ -121,25 +123,16 @@ def incremental_solution_2d(poses, edges):
         result = isam.calculateEstimate()
     return result
 
-
+# Muestra graficos comparativos entre dos conjuntos de poses
 def showComparisonGraphs(poses1, poses2, title1="Initial Trajectory Estimate", title2="Optimized Trajectory Estimate", output_path=None):
     fig = plt.figure(0)
     ax = fig.add_subplot(111)
     plt.cla()
 
-
     # extract translation coordinates from both pose sets
     def extract_xy(poses):
         xs, ys = [], []
-        indexes = list(poses.keys())
-
-        # Filtramos solo keys que son enteros
-        filtered_indexes = [k for k in indexes if isinstance(k, int) or (hasattr(k, 'toInt') and isinstance(k, int))]
-
-        # Ordenamos los indices
-        sorted_indexes = sorted(filtered_indexes)
-
-        for i in sorted_indexes:
+        for i in range(poses.size()):
             p = poses.atPose2(i)            
             xs.append(p.x()); ys.append(p.y())
         return xs, ys
@@ -147,11 +140,6 @@ def showComparisonGraphs(poses1, poses2, title1="Initial Trajectory Estimate", t
     xs1, ys1 = extract_xy(poses1)
     xs2, ys2 = extract_xy(poses2)
     
-
-    # Marcamos el primer punto de cada trayectoria
-    sc1 = ax.scatter(xs1[-1],ys1[-1], c='blue', label=f'Start {title1}', s=50, marker='o')
-    sc2 = ax.scatter(xs2[-1],ys2[-1], c='red', label=f'Start {title2}', s=50, marker='o')    
-
     ax.plot(xs1, ys1, c='blue', label=title1, alpha=0.7, linewidth=0.75)
     sc2 = ax.plot(xs2, ys2, c='red', label=title2, alpha=0.7, linewidth=0.75)        
     ax.set_xlabel('X-axis')
@@ -162,7 +150,7 @@ def showComparisonGraphs(poses1, poses2, title1="Initial Trajectory Estimate", t
 
     plt.savefig(f'pose2dImages/{output_path}.svg')
 
-
+# Muestra el grafo de poses
 def showGraph(poses, cov=None, title="Initial Trajectory", output_path=None):    
     fig = plt.figure(0)
     axes = fig.gca()
@@ -184,12 +172,14 @@ def showGraph(poses, cov=None, title="Initial Trajectory", output_path=None):
 
 def main(dataset='input_INTEL_g2o.g2o'):
     
+    # Ejercicio 2-A - Leyendo datos
     print("Leyendo datos...\n")
     vertexes, edges = readData(file=dataset)
     if not vertexes or not edges:
         print("No se pudieron leer los datos correctamente.")
         return
 
+    # Ejercicio 2-B - Batch Solution
     print("Generando la estimacion inicial...\n")
     graph, initial_estimate = createPoseGraph(vertexes, edges)
     showGraph(initial_estimate, output_path='pose_graph_initial')
@@ -207,13 +197,13 @@ def main(dataset='input_INTEL_g2o.g2o'):
     showGraph(optimizedGN, title="Optimized Trajectory", output_path='pose_graph_optimized_with_perturbation')
     showComparisonGraphs(initial_estimate, optimizedGN, output_path='comparison_initial_gn_with_perturbation')
 
+    # Ejercicio 2-C - Incremental Solution
     print("Generando el grafo de poses de forma incremental...\n")
     incremental_result = incremental_solution_2d(vertexes, edges)
     showGraph(incremental_result, title="Incremental Optimized Trajectory", output_path='pose_graph_incremental_optimized')
     showComparisonGraphs(initial_estimate, incremental_result, title1="Initial Trajectory Estimate",title2="Incremental Trajectory Estimate", output_path='comparison_initial_incremental')
    
 
-    
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Procesamiento de datos de un dataset G20 2d")    
     parser.add_argument("--dataset", default="input_INTEL_g2o.g2o", help="Dataset g2o 2d a procesar")

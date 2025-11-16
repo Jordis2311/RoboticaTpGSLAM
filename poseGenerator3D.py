@@ -8,6 +8,7 @@ from gtsam.utils import plot
 import matplotlib.pyplot as plt
 import argparse
 
+# Lee los datos del archivo g2o caso base lee parking-garage.g2o
 def readData(file = 'parking-garage.g2o'):
     vertexes = []
     edges = []
@@ -36,39 +37,8 @@ def readData(file = 'parking-garage.g2o'):
         print(f"Error: El archivo {file} no se encontró en el directorio 'data/'.")
     return vertexes, edges
 
-
-# [[q[0], q[1], q[2], q[3], q[4], q[5]]
-#  [q[1], q[6], q[7], q[8], q[9], q[10]]
-#  [q[2], q[7], q[11], q[12], q[13], q[14]]
-#  [q[3], q[8], q[12], q[15], q[16], q[17]]
-#  [q[4], q[9], q[13], q[16], q[18], q[19]]
-#  [q[5], q[10], q[14], q[17], q[19], q[20]]
-
-#       // g2o's EDGE_SE3:QUAT stores information/precision of Pose3 in t,R order, unlike GTSAM:
-#   
-# EDGE_SE3:QUAT 1332 1333 4.2216 -0.482494 0.00531712 -0.00313351 0.00563749 -0.115571 0.993278 1 0 0 0 0 0 1 0 0 0 0 1 0 0 0 4.00036 -0.000133256 0.0398948 3.99991 -0.00220671 3.94697
-
-#       Matrix6 mgtsam;
-#       mgtsam.block<3, 3>(0, 0) = m.block<3, 3>(3, 3); // info rotation
-#       mgtsam.block<3, 3>(3, 3) = m.block<3, 3>(0, 0); // info translation
-#       mgtsam.block<3, 3>(3, 0) = m.block<3, 3>(0, 3); // off diagonal g2o t,R -> GTSAM R,t
-#       mgtsam.block<3, 3>(0, 3) = m.block<3, 3>(3, 0); // off diagonal g2o R,t -> GTSAM t,R
-#       SharedNoiseModel model = noiseModel::Gaussian::Information(mgtsam);
-
-
+# Crea la matriz de informacion 6x6 a partir de los valores leidos del archivo g2o
 def create_information_matrix_3d(q):
-    # M = np.zeros((6, 6))
-    # idx = np.triu_indices(6)
-    # M[idx] = q
-    # M = M + np.triu(M, 1).T
-    # # print("Matriz original (g2o):\n", M)
-
-    # # 2. Reordenar bloques (g2o -> GTSAM)
-    # mgtsam = np.zeros((6, 6))
-    # mgtsam[0:3, 0:3] = M[3:6, 3:6]
-    # mgtsam[3:6, 3:6] = M[0:3, 0:3]
-    # mgtsam[3:6, 0:3] = M[0:3, 3:6]
-    # mgtsam[0:3, 3:6] = M[3:6, 0:3]
     mgtsam = np.array([[q[0], q[1], q[2], q[3], q[4], q[5]],
                         [q[1], q[6], q[7], q[8], q[9], q[10]],
                         [q[2], q[7], q[11], q[12], q[13], q[14]],
@@ -78,14 +48,14 @@ def create_information_matrix_3d(q):
 
     return gtsam.noiseModel.Gaussian.Information(mgtsam)
 
-
+# Crea una Pose3 a partir de las traslaciones y cuaterniones
 def create_pose3(dx, dy, dz, quaternions):
     rotation3 = gtsam.Rot3.Quaternion(quaternions[3], quaternions[0], quaternions[1], quaternions[2])
     point3 = gtsam.Point3(dx, dy, dz)
     pose3 = gtsam.Pose3(rotation3, point3)
     return pose3
 
-
+# Estimacion inicial del grafo de poses 3D
 def createPoseGraph3D(vertexes, edges):
     graph = gtsam.NonlinearFactorGraph()
     initial_estimate = gtsam.Values()
@@ -106,6 +76,7 @@ def createPoseGraph3D(vertexes, edges):
 
     return graph, initial_estimate
 
+# Perturba las estimaciones iniciales de las poses 3D
 def pertubateEstimations(poses, sigma, seed):
 
     new_poses = gtsam.Values()
@@ -113,15 +84,16 @@ def pertubateEstimations(poses, sigma, seed):
     np.random.seed(seed)
 
     # Perturbamos las poses
-    for (i, x, y, z, q)  in poses:
+    for i in poses.keys():
         
-        x_i = x + np.random.normal(0, sigma[0])
-        y_i = y + np.random.normal(0, sigma[1])
-        z_i = z + np.random.normal(0, sigma[2])
-        qx_i = q[0] + np.random.normal(0, sigma[3])
-        qy_i = q[1] + np.random.normal(0, sigma[4])
-        qz_i = q[2] + np.random.normal(0, sigma[5])
-        qw_i = q[3] + np.random.normal(0, sigma[6])
+        p_i = poses.atPose3(i)
+        x_i = p_i.x() + np.random.normal(0, sigma[0])
+        y_i = p_i.y() + np.random.normal(0, sigma[1])
+        z_i = p_i.z() + np.random.normal(0, sigma[2])
+        qx_i = p_i.rotation().toQuaternion().x() + np.random.normal(0, sigma[3])
+        qy_i = p_i.rotation().toQuaternion().y() + np.random.normal(0, sigma[4])
+        qz_i = p_i.rotation().toQuaternion().z() + np.random.normal(0, sigma[5])
+        qw_i = p_i.rotation().toQuaternion().w() + np.random.normal(0, sigma[6])
 
         # Creamos la nueva pose perturbada
         new_pose = create_pose3(x_i, y_i, z_i, [qx_i, qy_i, qz_i, qw_i])
@@ -130,24 +102,25 @@ def pertubateEstimations(poses, sigma, seed):
 
     return new_poses
 
-
+# Optimiza el grafo de poses 3D usando Gauss-Newton
 def optimizePoseGraph(graph, initial_estimate):
+    
+    # Configuramos el optimizador Gauss-Newton
     parameters = gtsam.GaussNewtonParams()
-    # Set optimization parameters
     parameters.setAbsoluteErrorTol(1e-9) # Stop when change in error is small
     parameters.setRelativeErrorTol(1e-9) # Stop when change in error is small
     parameters.setMaxIterations(50)     # Limit iterations
     parameters.setVerbosity("Termination")    
     optimizer = gtsam.GaussNewtonOptimizer(graph, initial_estimate, parameters)
 
-    # Optimize!
+    # Optimizamos
     result = optimizer.optimize()    
     
     marginals = gtsam.Marginals(graph, result)
     covariances = [marginals.marginalCovariance(i) for i in range(result.size())]
     return result, covariances
 
-
+# Solucion incremental del grafo de poses 3D
 def incremental_solution_3d(poses, edges):
     isam = gtsam.ISAM2()
     result = None
@@ -161,8 +134,8 @@ def incremental_solution_3d(poses, edges):
             graph.add(gtsam.PriorFactorPose3(i, pose3, priorModel))
             initial_estimate.insert(i, pose3)
         else:
-            prev_pose = poses[i-1]                
-            initial_estimate.insert(i, create_pose3(prev_pose[1], prev_pose[2], prev_pose[3], prev_pose[4]))
+            prev_pose = result.atPose3(i - 1)                
+            initial_estimate.insert(i, prev_pose)
         
         for edge in edges:
             ii, jj,dx, dy, dz, quaternions, info = edge
@@ -175,7 +148,7 @@ def incremental_solution_3d(poses, edges):
         result = isam.calculateEstimate()
     return result
 
-
+# Muestra la comparacion entre dos grafos de poses 3D
 def showComparisonGraphs3D(poses1, poses2, title1="Initial Trajectory", title2="Optimized Trajectory", output_path=None):
     fig = plt.figure(0)
     ax = fig.add_subplot(111, projection='3d')
@@ -211,11 +184,10 @@ def showComparisonGraphs3D(poses1, poses2, title1="Initial Trajectory", title2="
     xmax = max(max(xs1), max(xs2)) * 2
     ymin = min(min(ys1), min(ys2)) * 1.2
     ymax = max(max(ys1), max(ys2)) * 1.2
-    # print(xmin, xmax, ymin, ymax)
+
     ax.set_xlim([ymax, ymin])
     ax.set_ylim([xmin, xmax])
-    # ax.set_zlim([min(min(zs1),min(zs2)), max(max(zs1),max(zs2))])
-    
+
     # rotate z-axis 45 degrees clockwise (negative azim rotates clockwise)
     ax.view_init(elev=40, azim=-25)
     ax.grid(False)
@@ -230,11 +202,12 @@ def showComparisonGraphs3D(poses1, poses2, title1="Initial Trajectory", title2="
     plt.savefig(f'pose3dImages/{output_path}.svg')
     plt.close()
     
-    
+# Muestra el grafo de poses 3D
 def showGraph3D(poses, cov=None, title="Initial Trajectory", output_path=None):    
     fig = plt.figure(0)
     ax = fig.add_subplot(111, projection='3d')
     plt.cla()
+
     # Plot initial estimate poses
     for i in range(poses.size()):
         pose = poses.atPose3(i)                
@@ -250,6 +223,7 @@ def showGraph3D(poses, cov=None, title="Initial Trajectory", output_path=None):
 
 def main(dataset='parking-garage.g2o'):
     
+    # Ejercicio 3-A - Leyendo datos
     print("Leyendo datos...\n")
     vertexes, edges = readData(dataset)
 
@@ -257,6 +231,7 @@ def main(dataset='parking-garage.g2o'):
         print("No se pudieron leer los datos correctamente.")
         return
     
+    # Ejercicio 3-B - Batch Solution
     print("Generando la estimacion inicial...\n")
     graph, initial_estimate = createPoseGraph3D(vertexes, edges)    
     showGraph3D(initial_estimate, title="Initial 3D Pose Graph", output_path="initial_3d_pose_graph")
@@ -269,11 +244,12 @@ def main(dataset='parking-garage.g2o'):
     showComparisonGraphs3D(initial_estimate, optimizedGN, title1="Unoptimized Trajectory", title2="Optimized Trajectory", output_path="3d_trajectory_comparison")
 
     print("Optimizando el grafo de poses con Gauss Newton perturbando la estimacion inicial...\n")
-    perturbed_initial_estimate = pertubateEstimations(vertexes, (0.2, 0.2, 0.2, 0.1, 0.1, 0.1, 0.1), 0)
+    perturbed_initial_estimate = pertubateEstimations(initial_estimate, (0.2, 0.2, 0.2, 0.1, 0.1, 0.1, 0.1), 0)
     optimizedGN, covariances = optimizePoseGraph(graph, perturbed_initial_estimate)
     showGraph3D(optimizedGN, title="Optimized 3D Pose Graph with Perturbation", output_path="optimized_3d_pose_graph_with_perturbation")
     showComparisonGraphs3D(initial_estimate, optimizedGN, title1="Unoptimized Trajectory", title2="Optimized Trajectory with Perturbation", output_path="3d_trajectory_comparison_with_perturbation")
 
+    # Ejercicio 3-C - Incremental Solution
     print("Generando la solucion incremental...\n")
     incremental_result = incremental_solution_3d(vertexes, edges)
     showGraph3D(incremental_result, title="Incremental 3D Pose Graph", output_path="incremental_3d_pose_graph")
