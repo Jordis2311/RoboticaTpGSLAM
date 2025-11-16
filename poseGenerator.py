@@ -25,7 +25,7 @@ def readData(file = 'input_INTEL_g2o.g2o'):
                     y = float(line[3])
                     theta = float(line[4])
                     vertexes.append(('VERTEX_SE2', idx, x, y, theta))
-                elif line[0] == 'EDGE_SE2':
+                elif line[0] == 'EDGE_SE2':                    
                     i = int(line[1])
                     j = int(line[2])
                     dx = float(line[3])
@@ -59,12 +59,30 @@ def createPoseGraph(vertexes, edges):
 
     return graph, initial_estimate
 
+def pertubateEstimations(poses, sigma, seed):
+
+    new_poses = gtsam.Values()
+
+    np.random.seed(seed)
+
+    # Perturbamos cada una de las poses
+    for i in poses.keys():
+
+        # Obtenemos los valores de la pose
+        p_i = poses.atPose2(i)
+        x_i = p_i.x() + np.random.normal(0, sigma[0])
+        y_i = p_i.y() + np.random.normal(0, sigma[1])
+        t_i = p_i.theta() + np.random.normal(0, sigma[2])
+
+        # Creamos la nueva pose perturbada
+        new_poses.insert(i, Pose2(x_i, y_i, t_i))
+
+    return new_poses
+
 
 def optimizePoseGraph(graph, initial_estimate):
-    parameters = gtsam.GaussNewtonParams()
-    # Set optimization parameters
-    parameters.setRelativeErrorTol(1e-5) # Stop when change in error is small
-    parameters.setMaxIterations(100)     # Limit iterations
+    parameters = gtsam.GaussNewtonParams()    
+    parameters.setVerbosity("Termination")
     optimizer = gtsam.GaussNewtonOptimizer(graph, initial_estimate, parameters)
 
     # Optimize!
@@ -80,23 +98,25 @@ def incremental_solution_2d(poses, edges):
     for pose in poses:
         graph = gtsam.NonlinearFactorGraph()
         initial_estimate = gtsam.Values()
-        _, i, x, y, theta = pose
+        _, i, x, y, theta = pose        
         if i == 0:
-            graph.add(gtsam.PriorFactorPose2(i, Pose2(x, y, theta), gtsam.noiseModel.Diagonal.Variances(np.array([1e-6, 1e-6, 1e-8]))))
-            initial_estimate.insert(i, Pose2(x, y, theta))
+            pose2 = Pose2(x, y, theta)
+            graph.add(gtsam.PriorFactorPose2(i, pose2, gtsam.noiseModel.Diagonal.Sigmas(np.array([1e-6, 1e-6, 1e-8]))))
+            initial_estimate.insert(i, pose2)
         else:
-            prev_pose = poses[i-1]
-            initial_estimate.insert(i, Pose2(prev_pose[2], prev_pose[3], prev_pose[4]))
+            _, _, x_, y_, theta_ = poses[i-1]
+            initial_estimate.insert(i, Pose2(x_, y_, theta_))
         
         for edge in edges:
             _, ii, jj, dx, dy, dtheta, q = edge
             if  jj == i:
 
                 pose_ = Pose2(dx, dy, dtheta)
-                information_matrix = gtsam.noiseModel.Gaussian.Information(np.array([[q[0], q[1], q[2]],
-                                                                                    [q[1], q[3], q[4]],
-                                                                                    [q[2], q[4], q[5]]]))
-                graph.add(gtsam.BetweenFactorPose2(ii, jj, pose_, information_matrix))
+                info = np.array([[q[0], q[1], q[2]],
+                                [q[1], q[3], q[4]],
+                                [q[2], q[4], q[5]]])
+
+                graph.add(gtsam.BetweenFactorPose2(ii, jj, pose_, gtsam.noiseModel.Gaussian.Information(info)))
         isam.update(graph, initial_estimate)
         result = isam.calculateEstimate()
     return result
@@ -107,10 +127,19 @@ def showComparisonGraphs(poses1, poses2, title1="Initial Trajectory Estimate", t
     ax = fig.add_subplot(111)
     plt.cla()
 
+
     # extract translation coordinates from both pose sets
     def extract_xy(poses):
         xs, ys = [], []
-        for i in range(poses.size()):
+        indexes = list(poses.keys())
+
+        # Filtramos solo keys que son enteros
+        filtered_indexes = [k for k in indexes if isinstance(k, int) or (hasattr(k, 'toInt') and isinstance(k, int))]
+
+        # Ordenamos los indices
+        sorted_indexes = sorted(filtered_indexes)
+
+        for i in sorted_indexes:
             p = poses.atPose2(i)            
             xs.append(p.x()); ys.append(p.y())
         return xs, ys
@@ -118,6 +147,11 @@ def showComparisonGraphs(poses1, poses2, title1="Initial Trajectory Estimate", t
     xs1, ys1 = extract_xy(poses1)
     xs2, ys2 = extract_xy(poses2)
     
+
+    # Marcamos el primer punto de cada trayectoria
+    sc1 = ax.scatter(xs1[-1],ys1[-1], c='blue', label=f'Start {title1}', s=50, marker='o')
+    sc2 = ax.scatter(xs2[-1],ys2[-1], c='red', label=f'Start {title2}', s=50, marker='o')    
+
     ax.plot(xs1, ys1, c='blue', label=title1, alpha=0.7, linewidth=0.75)
     sc2 = ax.plot(xs2, ys2, c='red', label=title2, alpha=0.7, linewidth=0.75)        
     ax.set_xlabel('X-axis')
@@ -132,7 +166,7 @@ def showComparisonGraphs(poses1, poses2, title1="Initial Trajectory Estimate", t
 def showGraph(poses, cov=None, title="Initial Trajectory", output_path=None):    
     fig = plt.figure(0)
     axes = fig.gca()
-    plt.cla()
+    plt.cla()    
     # Plot initial estimate poses
     for i in range(poses.size()):
         pose = poses.atPose2(i)
@@ -167,10 +201,17 @@ def main(dataset='input_INTEL_g2o.g2o'):
     showGraph(optimizedGN, title="Optimized Trajectory", output_path='pose_graph_optimized')
     showComparisonGraphs(initial_estimate, optimizedGN, output_path='comparison_initial_gn')
 
+    print("Optimizando el grafo de poses con Gauss Newton perturbando la estimacion inicial...\n")
+    perturbed_initial_estimate = pertubateEstimations(initial_estimate, (0.2, 0.2, 0.1), 0)
+    optimizedGN, covariances = optimizePoseGraph(graph, perturbed_initial_estimate)
+    showGraph(optimizedGN, title="Optimized Trajectory", output_path='pose_graph_optimized_with_perturbation')
+    showComparisonGraphs(initial_estimate, optimizedGN, output_path='comparison_initial_gn_with_perturbation')
+
     print("Generando el grafo de poses de forma incremental...\n")
     incremental_result = incremental_solution_2d(vertexes, edges)
     showGraph(incremental_result, title="Incremental Optimized Trajectory", output_path='pose_graph_incremental_optimized')
     showComparisonGraphs(initial_estimate, incremental_result, title1="Initial Trajectory Estimate",title2="Incremental Trajectory Estimate", output_path='comparison_initial_incremental')
+   
 
     
 if __name__ == "__main__":

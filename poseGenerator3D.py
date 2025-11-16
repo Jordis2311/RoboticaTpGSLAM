@@ -70,11 +70,11 @@ def create_information_matrix_3d(q):
     # mgtsam[3:6, 0:3] = M[0:3, 3:6]
     # mgtsam[0:3, 3:6] = M[3:6, 0:3]
     mgtsam = np.array([[q[0], q[1], q[2], q[3], q[4], q[5]],
-                                   [q[1], q[6], q[7], q[8], q[9], q[10]],
-                                   [q[2], q[7], q[11], q[12], q[13], q[14]],
-                                   [q[3], q[8], q[12], q[15], q[16], q[17]],
-                                   [q[4], q[9], q[13], q[16], q[18], q[19]],
-                                   [q[5], q[10], q[14], q[17], q[19], q[20]]])
+                        [q[1], q[6], q[7], q[8], q[9], q[10]],
+                        [q[2], q[7], q[11], q[12], q[13], q[14]],
+                        [q[3], q[8], q[12], q[15], q[16], q[17]],
+                        [q[4], q[9], q[13], q[16], q[18], q[19]],
+                        [q[5], q[10], q[14], q[17], q[19], q[20]]])
 
     return gtsam.noiseModel.Gaussian.Information(mgtsam)
 
@@ -106,12 +106,37 @@ def createPoseGraph3D(vertexes, edges):
 
     return graph, initial_estimate
 
+def pertubateEstimations(poses, sigma, seed):
+
+    new_poses = gtsam.Values()
+
+    np.random.seed(seed)
+
+    # Perturbamos las poses
+    for (i, x, y, z, q)  in poses:
+        
+        x_i = x + np.random.normal(0, sigma[0])
+        y_i = y + np.random.normal(0, sigma[1])
+        z_i = z + np.random.normal(0, sigma[2])
+        qx_i = q[0] + np.random.normal(0, sigma[3])
+        qy_i = q[1] + np.random.normal(0, sigma[4])
+        qz_i = q[2] + np.random.normal(0, sigma[5])
+        qw_i = q[3] + np.random.normal(0, sigma[6])
+
+        # Creamos la nueva pose perturbada
+        new_pose = create_pose3(x_i, y_i, z_i, [qx_i, qy_i, qz_i, qw_i])
+
+        new_poses.insert(i, new_pose)
+
+    return new_poses
+
 
 def optimizePoseGraph(graph, initial_estimate):
     parameters = gtsam.GaussNewtonParams()
     # Set optimization parameters
-    parameters.setRelativeErrorTol(1e-5) # Stop when change in error is small
-    parameters.setMaxIterations(100)     # Limit iterations
+    parameters.setAbsoluteErrorTol(1e-9) # Stop when change in error is small
+    parameters.setRelativeErrorTol(1e-9) # Stop when change in error is small
+    parameters.setMaxIterations(50)     # Limit iterations
     parameters.setVerbosity("Termination")    
     optimizer = gtsam.GaussNewtonOptimizer(graph, initial_estimate, parameters)
 
@@ -167,8 +192,8 @@ def showComparisonGraphs3D(poses1, poses2, title1="Initial Trajectory", title2="
     xs1, ys1, zs1 = extract_xyz(poses1)
     xs2, ys2, zs2 = extract_xyz(poses2)    
     
-    ax.plot(xs1, ys1, zs1, c='blue', label=title1, alpha=0.7, linewidth=0.75)
-    sc2 = ax.plot(xs2, ys2, zs2, c='red', label=title2, alpha=0.7, linewidth=0.75)
+    ax.plot(ys1, xs1, zs1, c='blue', label=title1, alpha=0.7, linewidth=0.75)
+    sc2 = ax.plot(ys2, xs2, zs2, c='red', label=title2, alpha=0.7, linewidth=0.75)
     
     # shorten Z axis visually
     try:
@@ -182,10 +207,23 @@ def showComparisonGraphs3D(poses1, poses2, title1="Initial Trajectory", title2="
         if zhalf <= 0:
             zhalf = 1e-3
         ax.set_zlim(zmid - zhalf, zmid + zhalf)
-    ax.set_xlim([min(min(xs1),min(xs2)), max(max(xs1),max(xs2))])
-    ax.set_ylim([min(min(ys1),min(ys2)), max(max(ys1),max(ys2))])
+    xmin = min(min(xs1), min(xs2)) * 1.2
+    xmax = max(max(xs1), max(xs2)) * 2
+    ymin = min(min(ys1), min(ys2)) * 1.2
+    ymax = max(max(ys1), max(ys2)) * 1.2
+    # print(xmin, xmax, ymin, ymax)
+    ax.set_xlim([ymax, ymin])
+    ax.set_ylim([xmin, xmax])
     # ax.set_zlim([min(min(zs1),min(zs2)), max(max(zs1),max(zs2))])
-
+    
+    # rotate z-axis 45 degrees clockwise (negative azim rotates clockwise)
+    ax.view_init(elev=40, azim=-25)
+    ax.grid(False)
+    # make the panes transparent
+    ax.xaxis.set_pane_color((1.0, 1.0, 1.0, 0.0))
+    ax.yaxis.set_pane_color((1.0, 1.0, 1.0, 0.0))
+    ax.zaxis.set_pane_color((1.0, 1.0, 1.0, 0.0))
+    
     ax.set_title(f'{title1} vs {title2}')
     ax.legend()
 
@@ -199,7 +237,7 @@ def showGraph3D(poses, cov=None, title="Initial Trajectory", output_path=None):
     plt.cla()
     # Plot initial estimate poses
     for i in range(poses.size()):
-        pose = poses.atPose3(i)
+        pose = poses.atPose3(i)                
         cov_ = cov[i] if cov is not None else None      
         plot.plot_pose3(0, pose, axis_length=0.4, P = cov_)
 
@@ -229,6 +267,12 @@ def main(dataset='parking-garage.g2o'):
     optimizedGN, covariances = optimizePoseGraph(graph, initial_estimate)
     showGraph3D(optimizedGN, title="Optimized 3D Pose Graph", output_path="optimized_3d_pose_graph")
     showComparisonGraphs3D(initial_estimate, optimizedGN, title1="Unoptimized Trajectory", title2="Optimized Trajectory", output_path="3d_trajectory_comparison")
+
+    print("Optimizando el grafo de poses con Gauss Newton perturbando la estimacion inicial...\n")
+    perturbed_initial_estimate = pertubateEstimations(vertexes, (0.2, 0.2, 0.2, 0.1, 0.1, 0.1, 0.1), 0)
+    optimizedGN, covariances = optimizePoseGraph(graph, perturbed_initial_estimate)
+    showGraph3D(optimizedGN, title="Optimized 3D Pose Graph with Perturbation", output_path="optimized_3d_pose_graph_with_perturbation")
+    showComparisonGraphs3D(initial_estimate, optimizedGN, title1="Unoptimized Trajectory", title2="Optimized Trajectory with Perturbation", output_path="3d_trajectory_comparison_with_perturbation")
 
     print("Generando la solucion incremental...\n")
     incremental_result = incremental_solution_3d(vertexes, edges)
